@@ -90,9 +90,13 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
 
 if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    video_path = "./videos/C050204_006.mp4"
+    video_path = "./dataset/train/videos/normal_0.mp4"
+    audio_wav_path = "./dataset/train/audios/normal_0.wav"
 
-    audio_wav_path, audio_aac_path = extract_wav_from_mp4(video_path, tmp_path = './tmp')
+    # video_path = "./videos/normal.mp4"
+    # audio_wav_path = "./dataset/train/audios/normal.wav"
+
+    # audio_wav_path, audio_aac_path = extract_wav_from_mp4(video_path, tmp_path = './tmp')
 
     cap = cv2.VideoCapture(video_path)
 
@@ -110,7 +114,7 @@ if __name__ == "__main__":
                                                         ToFloat(),])
 
     rgb_stack = []
-    stack_size = 3
+    stack_size = 24
 
     model = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = audio_wav_path, img_stack_size = stack_size, device=device)
     
@@ -139,16 +143,23 @@ if __name__ == "__main__":
 
             rgb_stack.append(rgb)
 
+            print(len(rgb_stack))
+
             with torch.no_grad():
                 if len(rgb_stack) - 1 == stack_size:
+
                     rgb_stack_input = torch.cat(rgb_stack).to(device)
-                    # result = model(rgb_stack_input)
-                    model.show_optical_flow(rgb_stack_input)
+                    result = model(rgb_stack_input)
+                    # model.show_optical_flow(rgb_stack_input)
 
-                    # print(result[0].shape, result[1].shape, result[2].shape)
+                    print(result[0].shape, result[1].shape, result[2].shape)
+                    feature = torch.cat((result[0],result[1],result[2]), 1)
+                    print(feature.size())
+                    feature_save_path_name = "./dataset/train/feature/normal/feature_0" + ".pt"
+                    torch.save(feature, feature_save_path_name)
 
-                    rgb_stack = rgb_stack[1:]
-                    # rgb_stack = rgb_stack[stack_size:]
+                    # rgb_stack = rgb_stack[1:]
+                    rgb_stack = rgb_stack[stack_size:]
 
             print("FPS: ", 1/(time.time() - t0))
 

@@ -211,6 +211,7 @@ def extract_wav_from_mp4(video_path: str, tmp_path: str) -> str:
     aac_to_wav = f'{which_ffmpeg()} -hide_banner -loglevel panic -y -i {audio_aac_path} {audio_wav_path}'
     subprocess.call(mp4_to_acc.split())
     subprocess.call(aac_to_wav.split())
+    print(aac_to_wav)
 
     return audio_wav_path, audio_aac_path
 
