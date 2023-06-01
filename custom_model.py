@@ -70,22 +70,27 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
         
         return img_feature, flow_feature, audio_feature
 
-        # # maybe un-padding only before saving because np.concat will not work if the img is unpadded
-        # if padder is not None:
-        #     batch_feats = padder.unpad(img_flow)
 
-        # for idx, flow in enumerate(batch_feats):
-        #     img = x[idx].permute(1, 2, 0).cpu().numpy()
-        #     flow = flow.permute(1, 2, 0).cpu().numpy()
-        #     flow = flow_viz.flow_to_image(flow)
-        #     img_flow = np.concatenate([img, flow], axis=0)
-        #     cv2.imshow('Press any key to see the next frame...', img_flow[:, :, [2, 1, 0]] / 255.0)
-        #     cv2.waitKey()
+    def show_optical_flow(self, x):
+
+        img_flow = self.raft_model(self.padder.pad(x)[:-1], self.padder.pad(x)[1:])
+
+        # # maybe un-padding only before saving because np.concat will not work if the img is unpadded
+        if self.padder is not None:
+            batch_feats = self.padder.unpad(img_flow)
+
+        for idx, flow in enumerate(batch_feats):
+            img = x[idx].permute(1, 2, 0).cpu().numpy()
+            flow = flow.permute(1, 2, 0).cpu().numpy()
+            flow = flow_viz.flow_to_image(flow)
+            img_flow = np.concatenate([img, flow], axis=0)
+            cv2.imshow('Press any key to see the next frame...', img_flow[:, :, [2, 1, 0]] / 255.0)
+            cv2.waitKey()
 
 
 if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    video_path = "./videos/v_GGSY1Qvo990.mp4"
+    video_path = "./videos/C050204_006.mp4"
 
     audio_wav_path, audio_aac_path = extract_wav_from_mp4(video_path, tmp_path = './tmp')
 
@@ -105,7 +110,7 @@ if __name__ == "__main__":
                                                         ToFloat(),])
 
     rgb_stack = []
-    stack_size = 10
+    stack_size = 3
 
     model = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = audio_wav_path, img_stack_size = stack_size, device=device)
     
@@ -137,12 +142,13 @@ if __name__ == "__main__":
             with torch.no_grad():
                 if len(rgb_stack) - 1 == stack_size:
                     rgb_stack_input = torch.cat(rgb_stack).to(device)
-                    result = model(rgb_stack_input)
+                    # result = model(rgb_stack_input)
+                    model.show_optical_flow(rgb_stack_input)
 
                     # print(result[0].shape, result[1].shape, result[2].shape)
 
-                    # rgb_stack = rgb_stack[1:]
-                    rgb_stack = rgb_stack[stack_size:]
+                    rgb_stack = rgb_stack[1:]
+                    # rgb_stack = rgb_stack[stack_size:]
 
             print("FPS: ", 1/(time.time() - t0))
 
