@@ -16,6 +16,7 @@ import utils.flow_viz as flow_viz
 
 import cv2
 import time
+import math
 
 class Img_Audio_Feature_Extraction(torch.nn.Module):
     def __init__(self, I3D_weight_path, RAFT_weight_path, audio_path, img_stack_size, device):
@@ -87,6 +88,166 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
             cv2.imshow('Press any key to see the next frame...', img_flow[:, :, [2, 1, 0]] / 255.0)
             cv2.waitKey()
 
+class Swish(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, x):
+        return x * self.sigmoid(x)
+
+class Action_Classification_Model(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+
+        self.device = device
+
+        self.block_1 = torch.nn.Sequential(
+                        torch.nn.Linear(2176, 512),
+                        torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        torch.nn.Dropout(p=0.2),
+                        # torch.nn.Sigmoid(),
+                        Swish(),
+
+                        # torch.nn.Linear(2048, 1024),
+                        # torch.nn.BatchNorm1d(1024, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(1024, 512),
+                        # torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(512, 1024),
+                        # torch.nn.BatchNorm1d(1024, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(1024, 512),
+                        # torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(512, 512),
+                        # torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(512, 512),
+                        # torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(512, 512),
+                        # torch.nn.BatchNorm1d(512, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(512, 256),
+                        # torch.nn.BatchNorm1d(256, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(256, 128),
+                        # torch.nn.BatchNorm1d(128, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        # torch.nn.Linear(128, 64),
+                        # torch.nn.BatchNorm1d(64, momentum=0.99, eps=1e-3),
+                        # # torch.nn.Sigmoid(),
+                        # Swish(),
+
+                        torch.nn.Linear(512, 128),
+                        torch.nn.BatchNorm1d(128, momentum=0.99, eps=1e-3),
+                        # torch.nn.Dropout(p=0.2),
+                        # torch.nn.Sigmoid(),
+                        Swish(),
+
+                        torch.nn.Linear(128, 64),
+                        torch.nn.BatchNorm1d(64, momentum=0.99, eps=1e-3),
+                        # torch.nn.Dropout(p=0.2),
+                        # torch.nn.Sigmoid(),
+                        Swish(),
+
+                        torch.nn.Linear(64, 2),
+                        torch.nn.Softmax(),
+                        # torch.nn.Sigmoid(),
+        )
+
+        self.init_weights()
+
+        self.block_rgb = torch.nn.Sequential(
+                    torch.nn.Linear(1024, 512),
+                    torch.nn.BatchNorm1d(512),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(512, 256),
+                    torch.nn.BatchNorm1d(256),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(256, 128),
+                    torch.nn.BatchNorm1d(128),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(128, 64),
+                    torch.nn.BatchNorm1d(64),
+                    torch.nn.ReLU(),
+                    # torch.nn.Linear(256, 2),
+                    # torch.nn.Softmax(),
+                    # torch.nn.Sigmoid(),
+            )
+        
+        self.block_flow = torch.nn.Sequential(
+            torch.nn.Linear(1024, 512),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU(),
+            torch.nn.Linear(512, 256),
+            torch.nn.BatchNorm1d(256),
+            torch.nn.ReLU(),
+            torch.nn.Linear(256, 128),
+            torch.nn.BatchNorm1d(128),
+            torch.nn.ReLU(),
+            torch.nn.Linear(128, 64),
+            torch.nn.BatchNorm1d(64),
+            torch.nn.ReLU(),
+            # torch.nn.Linear(256, 2),
+            # torch.nn.Softmax(),
+            # torch.nn.Sigmoid(),
+            )
+
+        self.block_audio = torch.nn.Sequential(
+                    torch.nn.Linear(128, 64),
+                    torch.nn.BatchNorm1d(64),
+                    torch.nn.ReLU(),
+                    # torch.nn.Linear(256, 2),
+                    # torch.nn.Softmax(),
+                    # torch.nn.Sigmoid(),
+            )
+
+        self.block_cls = torch.nn.Sequential(
+                    torch.nn.Linear(64 * 3, 1),
+                    # torch.nn.Softmax(),
+                    torch.nn.Sigmoid(),
+            )
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, torch.nn.Linear):
+                init_range = 1.0 / math.sqrt(m.weight.shape[1])
+                # torch.nn.init.uniform_(m.weight, -init_range, init_range)
+                torch.nn.init.xavier_uniform_(m.weight)
+
+
+
+    def forward(self, x):
+        output_img = self.block_rgb(x[0].to(self.device))
+        output_flow = self.block_flow(x[1].to(self.device))
+        output_audio = self.block_audio(x[2].to(self.device))
+
+        output = self.block_cls(torch.cat((output_img, output_flow, output_audio), dim=1))
+
+        # output = self.block_2(x)
+
+        return output 
 
 if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -117,6 +278,7 @@ if __name__ == "__main__":
     stack_size = 24
 
     model = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = audio_wav_path, img_stack_size = stack_size, device=device)
+    ac_model = Action_Classification_Model().to(device).eval()
     
     frame_num = 0
     first_frame = True
@@ -155,8 +317,9 @@ if __name__ == "__main__":
                     print(result[0].shape, result[1].shape, result[2].shape)
                     feature = torch.cat((result[0],result[1],result[2]), 1)
                     print(feature.size())
-                    feature_save_path_name = "./dataset/train/feature/normal/feature_0" + ".pt"
-                    torch.save(feature, feature_save_path_name)
+                    output = ac_model(feature)
+                    # feature_save_path_name = "./dataset/train/feature/normal/feature_0" + ".pt"
+                    # torch.save(feature, feature_save_path_name)
 
                     # rgb_stack = rgb_stack[1:]
                     rgb_stack = rgb_stack[stack_size:]
