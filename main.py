@@ -9,6 +9,8 @@ from models.transforms import (Clamp, PermuteAndUnsqueeze, PILToTensor,
                                ToFloat, ToUInt8)
 
 from models.raft.raft_src.raft import RAFT, InputPadder
+from models.vggish.vggish_src.vggish_input import waveform_to_examples
+
 
 from custom_model import Img_Audio_Feature_Extraction
 
@@ -23,11 +25,20 @@ class Img_Buffer(object):
         self.img_data = None
         self.img_success_flag = True
         self.img_buffer = []
+        self.audio_buffer = []
         self.frame_num = 0
-    def set_img_data(self, data):
+
+    def set_input_data(self, data):
+        # self.frame_num = data[0]
+        # self.img_data = data[1]
+        # self.img_buffer.append(data[2])
+        # self.audio_buffer = data[3]
+
         self.frame_num = data[0]
-        self.img_data = data[1]
-        self.img_buffer.append(data[2])
+        # self.img_data = data[1]
+        self.img_buffer.append(data[1])
+        self.audio_buffer = data[2]
+
 
         if len(self.img_buffer) > 30:
             self.img_buffer.pop(0)
@@ -35,19 +46,35 @@ class Img_Buffer(object):
     def set_img_connect_flag(self, data):
         self.img_success_flag = data
     
-
     def get_img_data(self):
-        return self.img_success_flag, self.frame_num, self.img_data, self.img_buffer
+        # return self.img_success_flag, self.frame_num, self.img_data, self.img_buffer, self.audio_buffer
+        return self.img_success_flag, self.frame_num, self.img_buffer, self.audio_buffer
     
     def get_img_buffer(self):
         return self.img_buffer
 
-def video_capture(img_buffer, source):
-    resize_transforms = torchvision.transforms.Compose([torchvision.transforms.ToPILImage(),
-                                                        ResizeImproved(min_side_size),
-                                                        PILToTensor(),
-                                                        ToFloat(),])
-    cap = cv2.VideoCapture(source)
+
+def img_processing(pic):
+    image = cv2.cvtColor(np.array(pic), cv2.COLOR_RGB2BGR)
+
+    img = torch.from_numpy(np.array(pic, copy=True))
+    img = img.view(pic.size[1], pic.size[0], len(pic.getbands()))
+    # put it from HWC to CHW format
+    img = img.permute((2, 0, 1))
+
+def video_capture(data_buffer, video_source, audio_source):
+
+    audio_data = wavfile_to_examples(audio_source)
+
+    audio_sample_rate = 44100
+    video_fps = 30
+
+    audio_data_per_frame = int(audio_sample_rate / video_fps)
+
+    
+
+
+    cap = cv2.VideoCapture(video_source)
     frame_num = 0
 
     while True:
@@ -57,32 +84,33 @@ def video_capture(img_buffer, source):
 
         t0 = time.time()
 
+        audio_buffer = []
+        rgb = []
         if ret:
-            img_buffer.set_img_connect_flag(frame_exists)
+            data_buffer.set_img_connect_flag(frame_exists)
 
             frame_num += 1
-            
-            rgb = cv2.cvtColor(rgb_ori, cv2.COLOR_BGR2RGB)
-            rgb = resize_transforms(rgb)
-            rgb = rgb.unsqueeze(0)
 
-            img_buffer.set_img_data([frame_num, rgb_ori, rgb])
+            if frame_num >= 30:
+                audio_buffer = audio_data[int((frame_num - 30) * audio_data_per_frame) : int((frame_num) * audio_data_per_frame)]
+
+            data_buffer.set_input_data([frame_num, rgb_ori, audio_buffer])
 
             cv2.imshow("img", rgb_ori)
-            key = cv2.waitKey(5) # fps : 30
-            
-            print(1 / (time.time() - t0))
+            key = cv2.waitKey(20) # fps : 30
 
+            # print("frame_num : ", frame_num, "fps : ", 1 / (time.time() - t0))
+            
             if key == 27:
                 cap.release()
                 cv2.destroyAllWindows()
                 frame_exists = False
-                img_buffer.set_img_connect_flag(frame_exists)
+                data_buffer.set_img_connect_flag(frame_exists)
 
 
         else:
             frame_exists = False
-            img_buffer.set_img_connect_flag(frame_exists)
+            data_buffer.set_img_connect_flag(frame_exists)
             print("End of video")
             cap.release()
             break
@@ -113,7 +141,6 @@ if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     video_path = "./videos/test_video/test_8.mp4"
     audio_path = "./audios/test_8.wav"
-
     
     I3D_weight_path = {"rgb" : "./models/i3d/checkpoints/i3d_rgb.pt",
                     "flow" : "./models/i3d/checkpoints/i3d_flow.pt"}
@@ -121,25 +148,25 @@ if __name__ == "__main__":
     RAFT_weight_path = "./models/raft/checkpoints/raft-sintel.pth"
     VGGISH_weight_path = "./models/vggish/checkpoints/vggish-10086976.pth"
 
+    stack_size = 30
+    audio_sample_rate = 44100
     min_side_size = 256
 
-    audio_data = wavfile_to_examples(audio_path)
-
-    audio_sample_rate = 44100
-    video_fps = 30
-
-    audio_data_per_frame = int(audio_sample_rate / video_fps)
-
-
-    # model_feature = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = audio_wav_path, img_stack_size = stack_size, device=device)
+    model_feature = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = None, img_stack_size = stack_size, device=device)
+    # model_feature.eval()
     # model = Action_Classification_Model(device).to(device)
+
+    resize_transforms = torchvision.transforms.Compose([torchvision.transforms.ToPILImage(),
+                                                    ResizeImproved(min_side_size),
+                                                    PILToTensor(),
+                                                    ToFloat(),])
 
     BaseManager.register('img_buffer', Img_Buffer)
     manager = BaseManager()
     manager.start()
 
-    img_buffer = manager.img_buffer()
-    img_thread = Process(target=video_capture, args=[img_buffer, video_path])
+    data_buffer = manager.img_buffer()
+    img_thread = Process(target=video_capture, args=[data_buffer, video_path, audio_path])
     img_thread.start()
 
     # audio_wav_name = video_name.split(".")[0] + ".wav"
@@ -150,46 +177,62 @@ if __name__ == "__main__":
     first_frame = True
     padder = None
 
-    rgb_stack = []
-    stack_size = 30
+    frame_exist, frame_num, image_buffer, audio_buffer = data_buffer.get_img_data()
 
-    frame_exist, frame_num, rgb_ori, input_data = img_buffer.get_img_data()
-
-    if frame_exist:
-        while True:
-            t0 = time.time()
-            frame_exist, frame_num, rgb_ori, input_data = img_buffer.get_img_data()
-
-            if frame_exist == 0:
-                print("End of video")
-                break
-
-            if len(input_data): 
-                input_data_tensor = torch.cat(input_data)
-                input_audio_data = audio_data[int((frame_num - 30) * audio_data_per_frame) : int((frame_num) * audio_data_per_frame)]
-                # print(input_data_tensor.size())
-                # print(input_audio_data.shape)
-            
-
-            # if padder is None:
-            #     padder = InputPadder(input_data[0].shape)
-            #     model_feature.padder = padder
-
-            # with torch.no_grad():
-            #     if len(input_data) == stack_size:
-            #         rgb_stack_input = torch.cat(input_data).to(device)
-            #         result = model_feature(rgb_stack_input)
-            #          # feature : rgb, flow, audio
-            #         feature = [result[0].squeeze(0),result[1].squeeze(0),result[2].squeeze(0)]
-
-            #         y_pred = model([torch.unsqueeze(feature[0], dim = 0), torch.unsqueeze(feature[1], dim = 0), torch.unsqueeze(feature[2], dim = 0)])
+    try:
+        if frame_exist:
+            while True:
+                t0 = time.time()
+                frame_exist, frame_num, image_buffer, audio_buffer = data_buffer.get_img_data()
 
 
-                    # rgb_stack = rgb_stack[1:]
-                    
 
-            # print("FPS: ", 1/(time.time() - t0))
+                if frame_exist == 0:
+                    print("End of video")
+                    break
 
-            # cv2.imshow("img", rgb_ori)
-            # cv2.waitKey(1)
+                if len(image_buffer) == 30:
+                    for i in range(len(image_buffer)):
+                        rgb = cv2.cvtColor(image_buffer[i], cv2.COLOR_BGR2RGB)
+                        rgb = resize_transforms(rgb)
+                        image_buffer[i] = rgb.unsqueeze(0)
 
+                    if padder is None:
+                        padder = InputPadder(image_buffer[0].shape)
+                        model_feature.padder = padder
+
+                    input_data_tensor = torch.cat(image_buffer).to(device)
+                    with torch.no_grad():
+                        result = model_feature(input_data_tensor, audio_buffer)
+                #         print(result[0].size())
+                #         print(result[1].size())
+                #         print(result[2].size())
+
+
+                        # feature : rgb, flow, audio
+                        # feature = [result[0].squeeze(0),result[1].squeeze(0),result[2].squeeze(0)]
+
+
+                        # y_pred = model_feature([torch.unsqueeze(feature[0], dim = 0), torch.unsqueeze(feature[1], dim = 0), torch.unsqueeze(feature[2], dim = 0)])
+
+
+                
+
+
+
+                        # rgb_stack = rgb_stack[1:]
+                        
+
+                print("FPS: ", 1/(time.time() - t0))
+
+                # cv2.imshow("img", rgb_ori)
+                # cv2.waitKey(1)
+
+    except KeyboardInterrupt:
+        del model_feature
+        import torch, gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        img_thread.terminate()
+
+        print('Ctrl + C 중지 메시지 출력')

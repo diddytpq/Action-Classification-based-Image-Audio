@@ -19,7 +19,7 @@ import time
 import math
 
 class Img_Audio_Feature_Extraction(torch.nn.Module):
-    def __init__(self, I3D_weight_path, RAFT_weight_path, audio_path, img_stack_size, device):
+    def __init__(self, I3D_weight_path, RAFT_weight_path, audio_path = None, img_stack_size = 30, device = 'cpu'):
         super().__init__()
 
         self.device = device
@@ -31,6 +31,7 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
         self.i3d_model_rgb = I3D(num_classes=400, modality='rgb')
         self.i3d_model_rgb.load_state_dict(torch.load(I3D_weight_path['rgb'], map_location='cpu'))
         self.i3d_model_rgb = self.i3d_model_rgb.to(self.device).eval()
+
 
         self.i3d_model_flow = I3D(num_classes=400, modality='flow')
         self.i3d_model_flow.load_state_dict(torch.load(I3D_weight_path['flow'], map_location='cpu'))
@@ -58,7 +59,7 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
             ])
         }
 
-    def forward(self, x):
+    def forward(self, x, audio_input = None):
         img_flow = self.raft_model(self.padder.pad(x)[:-1], self.padder.pad(x)[1:])
 
         rgb_input = self.i3d_transforms['rgb'](x[:-1])
@@ -67,13 +68,16 @@ class Img_Audio_Feature_Extraction(torch.nn.Module):
         img_feature = self.i3d_model_rgb(rgb_input, features=True)
         flow_feature = self.i3d_model_flow(flow_input, features=True)
 
-        audio_feature = self.vggish_model(self.audio_path, self.device)
+        if self.audio_path is not None:
+            audio_feature = self.vggish_model(self.audio_path, self.device)
+        
+        else:
+            audio_feature = self.vggish_model(audio_input, self.device, fs = 44100)
         
         return img_feature, flow_feature, audio_feature
 
 
     def show_optical_flow(self, x):
-
         img_flow = self.raft_model(self.padder.pad(x)[:-1], self.padder.pad(x)[1:])
 
         # # maybe un-padding only before saving because np.concat will not work if the img is unpadded
