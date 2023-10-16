@@ -11,8 +11,7 @@ from models.transforms import (Clamp, PermuteAndUnsqueeze, PILToTensor,
 from models.raft.raft_src.raft import RAFT, InputPadder
 from models.vggish.vggish_src.vggish_input import waveform_to_examples
 
-
-from custom_model import Img_Audio_Feature_Extraction
+from custom_model import Img_Audio_Feature_Extraction, Action_Classification_Model
 
 from multiprocessing import Process, Pipe, Manager, Queue
 from multiprocessing.managers import BaseManager
@@ -27,6 +26,7 @@ class Img_Buffer(object):
         self.img_buffer = []
         self.audio_buffer = []
         self.frame_num = 0
+        self.predict_result = 0
 
     def set_input_data(self, data):
         # self.frame_num = data[0]
@@ -53,6 +53,11 @@ class Img_Buffer(object):
     def get_img_buffer(self):
         return self.img_buffer
 
+    def set_predict_result(self, data):
+        self.predict_result = data
+
+    def get_predict_result(self):
+        return self.predict_result
 
 def img_processing(pic):
     image = cv2.cvtColor(np.array(pic), cv2.COLOR_RGB2BGR)
@@ -71,8 +76,6 @@ def video_capture(data_buffer, video_source, audio_source):
 
     audio_data_per_frame = int(audio_sample_rate / video_fps)
 
-    
-
 
     cap = cv2.VideoCapture(video_source)
     frame_num = 0
@@ -84,8 +87,19 @@ def video_capture(data_buffer, video_source, audio_source):
 
         t0 = time.time()
 
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        normal = "Normal"
+        abnormal = "Accident"
+
+        font_scale = 1.5
+        font_thickness = 2
+        c1, c2 = (int(0), int(0)), (int(300), int(80))
+
         audio_buffer = []
         rgb = []
+
         if ret:
             data_buffer.set_img_connect_flag(frame_exists)
 
@@ -96,8 +110,31 @@ def video_capture(data_buffer, video_source, audio_source):
 
             data_buffer.set_input_data([frame_num, rgb_ori, audio_buffer])
 
-            cv2.imshow("img", rgb_ori)
-            key = cv2.waitKey(20) # fps : 30
+            status = data_buffer.get_predict_result()
+
+            if status > 0.9:
+                cv2.rectangle(rgb_ori, c1, c2, (0, 0 ,255), thickness=-1, lineType=cv2.LINE_AA)
+
+                cv2.putText(rgb_ori, abnormal,
+                (int(c2[0]/6.5) , int(c2[1]/1.5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (0, 0, 0),   # 글자 색상 (흰색)
+                font_thickness)
+
+            else:
+                cv2.rectangle(rgb_ori, c1, c2, (0, 255 ,0), thickness=-1, lineType=cv2.LINE_AA)
+                cv2.putText(rgb_ori, normal,
+                (int(c2[0]/6.5) , int(c2[1]/1.5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (0, 0, 0),   # 글자 색상 (흰색)
+                font_thickness)
+
+            # cv2.imshow("img", rgb_ori)
+            cv2.imshow("img", cv2.resize(rgb_ori, (1280, 720)))
+
+            key = cv2.waitKey(30) # fps : 30
 
             # print("frame_num : ", frame_num, "fps : ", 1 / (time.time() - t0))
             
@@ -139,8 +176,11 @@ def get_input_audio_buffer(audio_data, sampleing_rate = 44100):
 
 if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    video_path = "./videos/test_video/test_8.mp4"
-    audio_path = "./audios/test_8.wav"
+
+    video_name = "test_11"
+
+    video_path = f"./videos/{video_name}.mp4"
+    audio_path = f"./audios/{video_name}.wav"
     
     I3D_weight_path = {"rgb" : "./models/i3d/checkpoints/i3d_rgb.pt",
                     "flow" : "./models/i3d/checkpoints/i3d_flow.pt"}
@@ -148,13 +188,17 @@ if __name__ == "__main__":
     RAFT_weight_path = "./models/raft/checkpoints/raft-sintel.pth"
     VGGISH_weight_path = "./models/vggish/checkpoints/vggish-10086976.pth"
 
+    ACM_weight_path = "./models/custom/e100_Adam_0.048791107.pt"
+
     stack_size = 30
     audio_sample_rate = 44100
     min_side_size = 256
 
     model_feature = Img_Audio_Feature_Extraction(I3D_weight_path, RAFT_weight_path, audio_path = None, img_stack_size = stack_size, device=device)
     # model_feature.eval()
-    # model = Action_Classification_Model(device).to(device)
+    model = Action_Classification_Model(device).to(device)
+    model.load_state_dict(torch.load(ACM_weight_path))
+    model.eval()
 
     resize_transforms = torchvision.transforms.Compose([torchvision.transforms.ToPILImage(),
                                                     ResizeImproved(min_side_size),
@@ -185,8 +229,6 @@ if __name__ == "__main__":
                 t0 = time.time()
                 frame_exist, frame_num, image_buffer, audio_buffer = data_buffer.get_img_data()
 
-
-
                 if frame_exist == 0:
                     print("End of video")
                     break
@@ -204,26 +246,13 @@ if __name__ == "__main__":
                     input_data_tensor = torch.cat(image_buffer).to(device)
                     with torch.no_grad():
                         result = model_feature(input_data_tensor, audio_buffer)
-                #         print(result[0].size())
-                #         print(result[1].size())
-                #         print(result[2].size())
+                        y_pred = model(result)
 
+                        data_buffer.set_predict_result(y_pred.cpu())
 
-                        # feature : rgb, flow, audio
-                        # feature = [result[0].squeeze(0),result[1].squeeze(0),result[2].squeeze(0)]
-
-
-                        # y_pred = model_feature([torch.unsqueeze(feature[0], dim = 0), torch.unsqueeze(feature[1], dim = 0), torch.unsqueeze(feature[2], dim = 0)])
-
-
-                
-
-
-
-                        # rgb_stack = rgb_stack[1:]
-                        
-
-                print("FPS: ", 1/(time.time() - t0))
+                        # y_pred = model([torch.unsqueeze(result[0], dim = 0), torch.unsqueeze(result[1], dim = 0), torch.unsqueeze(result[2], dim = 0)])
+                        print(y_pred)
+                # print("FPS: ", 1/(time.time() - t0))
 
                 # cv2.imshow("img", rgb_ori)
                 # cv2.waitKey(1)

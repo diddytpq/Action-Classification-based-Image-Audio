@@ -3,8 +3,8 @@ from utils.utils import extract_wav_from_mp4
 import subprocess
 
 
-video_path = "./videos/test_video/"
-video_name = "test_8.mp4"
+video_path = "./videos/"
+video_name = "test_11.mp4"
 
 audio_path = "./audios/"
 wav_name = video_name.split(".")[0] + ".wav"

@@ -16,8 +16,8 @@ from custom_model import Img_Audio_Feature_Extraction
 if __name__ == "__main__":
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     # video_path = "./dataset/train/videos/"
-    # video_path = "./dataset/train/split_videos/normal/"
-    video_path = "./dataset/train/split_videos/abnormal/"
+    video_path = "./dataset/train/split_videos/normal/"
+    # video_path = "./dataset/train/split_videos/abnormal/"
     
     video_list = os.listdir(video_path)
 
@@ -33,12 +33,17 @@ if __name__ == "__main__":
                                                         ResizeImproved(min_side_size),
                                                         PILToTensor(),
                                                         ToFloat(),])
+    
+    # feature_save_path_name = "./dataset/train/features/abnormal/"
+    feature_save_path_name = "./dataset/train/features/normal/"
+
+    os.makedirs(feature_save_path_name, exist_ok=True)
 
     for video_name in video_list:
         print(video_name)
         audio_wav_name = video_name.split(".")[0] + ".wav"
-        # audio_wav_path = "./dataset/train/audios/normal/" + audio_wav_name
-        audio_wav_path = "./dataset/train/audios/abnormal/" + audio_wav_name
+        audio_wav_path = "./dataset/train/audios/normal/" + audio_wav_name
+        # audio_wav_path = "./dataset/train/audios/abnormal/" + audio_wav_name
 
         cap = cv2.VideoCapture(video_path + video_name)
 
@@ -86,9 +91,9 @@ if __name__ == "__main__":
 
                         # feature_save_path_name = "./dataset/train/feature/normal/{}".format(video_name) + ".pt"
                         # feature_save_path_name = "./dataset/train/features/normal/{}".format(video_name.split('.')[0]) + ".pt"
-                        feature_save_path_name = "./dataset/train/features/abnormal/{}".format(video_name.split('.')[0]) + ".pt"
 
-                        torch.save(feature, feature_save_path_name)
+                        torch.save(feature, feature_save_path_name +"{}".format(video_name.split('.')[0]) + ".pt")
+                        print(feature_save_path_name +"{}".format(video_name.split('.')[0]) + ".pt")
                         print("feature saved")
 
                         # rgb_stack = rgb_stack[1:]

@@ -5,6 +5,8 @@ from custom_model import Img_Audio_Feature_Extraction, Action_Classification_Mod
 import argparse
 import time
 import numpy as np
+import matplotlib.pyplot as plt
+import os
 
 def FocalLoss(y_pred, y_true):
     eps = 1e-7
@@ -47,7 +49,8 @@ def train(model, train_loader, epoch, loss_fn, batch_size):
         optimizer.step()
 
         t1 = time.time()
-        print('Train Epoch" {} [{}/{} ({:.0f}%)]'.format(epoch, (batch_idx+1) * len(data), len(train_loader.dataset),100.0 * (batch_idx+1) / len(train_loader))+'\tLoss :',format(float(loss.data.cpu().numpy()),'.1E'),"\t time : ",(t1 - t0),"sec")
+        print(f'Train Epoch" {str(epoch)} [{str((batch_idx+1) * len(data))}/{str(len(train_loader.dataset))} ({str(np.round(100.0 * (batch_idx+1) / len(train_loader)))}%)]' + 
+        f'\tLoss : {str(np.round(loss.item(), 3))}' + f"\t time : {str(np.round(t1 - t0, 3))} sec")
         t0 = time.time()
 
     train_loss /= len(train_loader)
@@ -56,8 +59,8 @@ def train(model, train_loader, epoch, loss_fn, batch_size):
 
 parser = argparse.ArgumentParser(description='Action Classification')
 
-parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
-parser.add_argument('--optimizer', type=str, default='Adadelta', help='optimizer')
+parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
+parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer')
 parser.add_argument('--weight_decay', type = float, default = 5e-4, help = 'weight decay (default: 5e-4)')
 parser.add_argument('--epochs', type=int, default=100, help='epochs')
 
@@ -70,6 +73,10 @@ print('GPU Use : ',torch.cuda.is_available())
 
 data_path_x_normal = "./dataset/train/features/normal/"
 data_path_x_abnormal = "./dataset/train/features/abnormal/"
+
+model_save_path = "./models/custom"
+
+os.makedirs(model_save_path, exist_ok=True)
 
 batch_size = 32
 
@@ -105,9 +112,17 @@ for epoch in range(1, args.epochs + 1):
     train_loss.append(loss.cpu().numpy())
     scheduler.step()
 
+    if epoch % 5 == 0:
+        torch.save(model.state_dict(), f"{model_save_path}/e{str(epoch)}_{str(args.optimizer)}({str(args.lr)})_{str(np.mean(train_loss))}.pt")
+        # plt.plot(train_loss)
+        # plt.savefig(f"{model_save_path}/{str(args.optimizer)}.png", dpi=300)
+
 print(np.mean(train_loss))
 
-torch.save(model.state_dict(), f"./models/custom/e{str(args.epochs)}_{str(args.optimizer)}_{str(np.mean(train_loss))}.pt")
+torch.save(model.state_dict(), f"{model_save_path}/e{str(args.epochs)}_{str(args.optimizer)}_{str(np.mean(train_loss))}.pt")
+# plt.plot(train_loss)
+# plt.savefig(f"{model_save_path}/{str(args.optimizer)}.png", dpi=300)
+
 
 # model.eval()
 # with torch.no_grad():
